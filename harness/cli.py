@@ -31,7 +31,7 @@ FAULT_FAILS = {"none": [], "duplicate": ["B"], "precision": ["A", "E2"], "partit
 def parse_args(argv):
     p = argparse.ArgumentParser(prog="run.sh", description="Legacy vs Rust parity harness")
     p.add_argument("--job", required=True, choices=sorted(JOBS))
-    p.add_argument("--fixture", required=True, choices=["sample", "full"])
+    p.add_argument("--fixture", required=True, choices=["sample", "full", "edge"])
     p.add_argument("--legacy-only", action="store_true")
     p.add_argument("--chaos", action="store_true")
     p.add_argument("--chaos-at", type=float, default=0.4)
@@ -108,8 +108,8 @@ class Run:
         return 0 if status == "PASS" else 1
 
     def prepare_fixture(self) -> Path:
-        if self.a.fixture == "sample":
-            return DATA_CONTRACTS / "fixtures" / "sample"
+        if self.a.fixture in ("sample", "edge"):
+            return DATA_CONTRACTS / "fixtures" / self.a.fixture
         out = self.dir / "fixture"
         subprocess.run([sys.executable, str(DATA_CONTRACTS / "generator" / "gen.py"), "--out", str(out)],
                        check=True, stdout=subprocess.DEVNULL)
