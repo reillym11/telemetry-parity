@@ -1,0 +1,1 @@
+{"partition": 1, "offset": 0, "key": "SYNEDGEUPD0000001|OTA-2026.10.1", "value": "{\"vin\":\"SYNEDGEUPD0000001\",\"campaign_id\":\"OTA-2026.10.1\",\"state\":\"failed\",\"target_version\":\"2026.10.1\",\"failure_code\":\"E_INSTALL_PRECHECK\",\"last_event_id\":\"dd7f55b0-161f-59ca-a05b-bb58fb1eec37\",\"last_event_time\":\"2026-10-01T03:10:00.000Z\"}"}

@@ -16,7 +16,7 @@ Needs Docker with compose. The first run builds the spark-runner image from the 
 ## Usage
 
 ```
-./run.sh --job <name> --fixture sample|full [--legacy-only] [--chaos] [--chaos-at 0.4]
+./run.sh --job <name> --fixture sample|full|edge [--legacy-only] [--chaos] [--chaos-at 0.4]
          [--self-test <fault>] [--determinism] [--manifest privacy-manifest.yaml] [--legacy-from-golden]
 ```
 

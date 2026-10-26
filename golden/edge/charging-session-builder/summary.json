@@ -1,0 +1,19 @@
+{
+  "by_close_reason": {
+    "charge_stop": 1,
+    "gap_timeout": 2
+  },
+  "deps": {
+    "DATA_CONTRACTS_SHA": "b4ba80f4c6c69309620462898fc47b9e0dc72770",
+    "TELEMETRY_RS_SHA": "",
+    "TELEMETRY_SPARK_JOBS_SHA": "169768600588ed628f2618af54ea6e2f8b6039c1"
+  },
+  "duplicates": 0,
+  "effective_records": 3,
+  "fixture": "edge",
+  "input_records": 19,
+  "job": "charging-session-builder",
+  "manifest_sha256": "93f138a75263edba7d3c22190711fa6697dda7649b65b6257c26dd2c76f61a32",
+  "nondeterministic_keys": 0,
+  "output_records": 3
+}
