@@ -1,0 +1,20 @@
+{
+  "by_severity": {
+    "3": 45,
+    "4": 23,
+    "5": 7
+  },
+  "deps": {
+    "DATA_CONTRACTS_SHA": "1afa95bfb44ed80c915814ad5410a7a77d688ce0",
+    "TELEMETRY_RS_SHA": "",
+    "TELEMETRY_SPARK_JOBS_SHA": "20e81ac30fd5db261ed86012146bd5cedf30c110"
+  },
+  "duplicates": 0,
+  "effective_records": 75,
+  "fixture": "full",
+  "input_records": 838,
+  "job": "diagnostics-dtc-router",
+  "manifest_sha256": "7395f83271e2feb5ce8d0270bdb16b3b85f05fb5714531b58b97546724c4ecba",
+  "nondeterministic_keys": 0,
+  "output_records": 75
+}

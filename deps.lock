@@ -1,0 +1,5 @@
+# Pinned dependency commits. scripts/fetch-deps.sh clones these into .deps/.
+DATA_CONTRACTS_SHA=1afa95bfb44ed80c915814ad5410a7a77d688ce0
+TELEMETRY_SPARK_JOBS_SHA=20e81ac30fd5db261ed86012146bd5cedf30c110
+# Optional: telemetry-rs commit the Rust image was built from (recorded in reports only).
+TELEMETRY_RS_SHA=

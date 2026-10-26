@@ -1,0 +1,8 @@
+.deps/
+runs/
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+golden/full/*/output.jsonl
+golden/full/*/parquet/
