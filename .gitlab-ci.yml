@@ -1,0 +1,78 @@
+stages:
+  - unit
+  - build
+  - golden
+  - self-test
+  - parity
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  DOCKER_HOST: tcp://docker:2375
+  DOCKER_TLS_CERTDIR: ""
+  KAFKA_EXTERNAL_HOST: docker
+
+unit:
+  stage: unit
+  image: python:3.11
+  script:
+    - pip install -r requirements.txt
+    - scripts/fetch-deps.sh
+    - python -m pytest -q harness/tests -m "not e2e"
+
+.docker:
+  image: python:3.11
+  services:
+    - name: docker:27-dind
+      alias: docker
+  before_script:
+    - curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-27.5.1.tgz | tar xz -C /usr/local/bin --strip-components=1 docker/docker
+    - mkdir -p /usr/local/lib/docker/cli-plugins
+    - curl -fsSL -o /usr/local/lib/docker/cli-plugins/docker-compose https://github.com/docker/compose/releases/download/v2.32.4/docker-compose-linux-x86_64
+    - chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+    - pip install -r requirements.txt
+    - scripts/fetch-deps.sh
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    - source deps.lock && export SPARK_RUNNER_IMAGE="$CI_REGISTRY_IMAGE/spark-runner:${TELEMETRY_SPARK_JOBS_SHA:0:12}"
+  artifacts:
+    when: always
+    expire_in: 90 days
+    expose_as: "Parity report"
+    paths:
+      - runs/
+
+spark-runner:
+  extends: .docker
+  stage: build
+  artifacts: null
+  script:
+    - docker pull "$SPARK_RUNNER_IMAGE" || { docker compose --profile jobs build spark-runner && docker push "$SPARK_RUNNER_IMAGE"; }
+
+golden:
+  extends: .docker
+  stage: golden
+  script:
+    - for j in ota-status-tracker charging-session-builder battery-health-aggregator diagnostics-dtc-router; do ./run.sh --job $j --fixture sample --legacy-only; done
+    - ./run.sh --job charging-session-builder --fixture sample --determinism
+
+self-test:
+  extends: .docker
+  stage: self-test
+  timeout: 2h
+  script:
+    - ./run.sh --job charging-session-builder --fixture full --legacy-only
+    - python -m pytest -q harness/tests -m e2e
+
+parity:
+  extends: .docker
+  stage: parity
+  rules:
+    - if: $RUST_IMAGE
+      when: manual
+  script:
+    - for j in ota-status-tracker charging-session-builder battery-health-aggregator diagnostics-dtc-router; do RUST_IMAGE="${RUST_IMAGE}" ./run.sh --job $j --fixture sample --chaos || status=1; done; exit ${status:-0}

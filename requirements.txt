@@ -1,0 +1,7 @@
+confluent-kafka==2.16.0
+pyarrow==26.0.0
+boto3==1.43.118
+pyyaml==6.0.3
+jsonschema==4.26.0
+referencing==0.37.0
+pytest==9.1.1
