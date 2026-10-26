@@ -50,13 +50,15 @@ def parse_args(argv):
 
 def main(argv=None):
     args = parse_args(argv)
+    run = None
     try:
-        return Run(args, argv if argv is not None else sys.argv[1:]).execute()
-    except HarnessError as e:
-        print(f"harness error: {e}", file=sys.stderr)
-        return 2
-    except Exception:
-        traceback.print_exc()
+        run = Run(args, argv if argv is not None else sys.argv[1:])
+        return run.execute()
+    except Exception as e:
+        msg = f"harness error: {e}" if isinstance(e, HarnessError) else traceback.format_exc()
+        print(msg, file=sys.stderr)
+        if run is not None:
+            (run.dir / "harness-error.txt").write_text(msg + "\n")
         return 2
 
 

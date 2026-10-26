@@ -25,7 +25,9 @@ def test_fault_fails_exactly_its_check(job, fixture, fault, chaos):
     proc = subprocess.run(args, cwd=ROOT, capture_output=True, text=True)
     new = sorted(set(RUNS.glob("*")) - before)
     assert new, proc.stdout + proc.stderr
-    report = json.loads((new[-1] / "parity-report.json").read_text())
+    path = new[-1] / "parity-report.json"
+    assert path.exists(), (proc.returncode, proc.stdout[-1500:], proc.stderr[-3000:])
+    report = json.loads(path.read_text())
     st = report["self_test"]
     assert st["actual_fail"] == FAULT_FAILS[fault], (st, proc.stdout[-2000:])
     assert proc.returncode == (0 if fault == "none" else 1)
