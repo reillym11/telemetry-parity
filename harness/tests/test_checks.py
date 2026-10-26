@@ -3,7 +3,7 @@ from decimal import Decimal
 
 import pytest
 
-from harness import checks
+from harness import checks, config
 from harness.checks import Output, Rec, parse
 from harness.config import JOBS
 from harness.murmur2 import java_partition, murmur2
@@ -123,6 +123,9 @@ def test_b_ota_identical_key_value_is_duplicate_but_update_is_not():
         return Rec(0, off, "V|C", v, json.dumps(v))
     assert checks.repeats(OTA, out("r", o(0, "downloaded"), o(1, "installed"))) == 0
     assert checks.repeats(OTA, out("r", o(0, "installed"), o(1, "installed"))) == 1
+    v = {"vin": "V", "campaign_id": "C", "state": "installed", "last_event_id": "e"}
+    a, b = Rec(0, 0, "V|C", v, json.dumps(v)), Rec(0, 1, "V|C", dict(v), json.dumps(v, separators=(",", ":")))
+    assert checks.repeats(OTA, out("r", a, b)) == 1
 
 
 # ---------- C ----------
@@ -151,6 +154,27 @@ def test_d_partition_mismatch_fails_with_explanation():
     r = checks.check_d(CHARGING, out("l", rec(0, 0)), out("r", rec(3, 0)))
     assert status(r) == "FAIL" and "murmur2_random" in r["explanation"]
     assert status(checks.check_d(CHARGING, out("l", rec(2, 0)), out("r", rec(2, 5)))) == "PASS"
+
+
+def test_d_wrong_kafka_key_fails():
+    good = rec(2, 0)
+    bad = Rec(2, 0, "other", good.value, good.raw)
+    r = checks.check_d(CHARGING, out("l", good), out("r", bad))
+    assert status(r) == "FAIL" and r["metrics"]["wrong_key"] == 1
+
+
+def test_d_rust_only_key_must_use_java_murmur2():
+    vin = "SYNAAAAAAAAAAAAA1"
+    right = java_partition(vin.encode(), 6)
+    assert status(checks.check_d(CHARGING, out("l"), out("r", rec(right, 0)))) == "PASS"
+    assert status(checks.check_d(CHARGING, out("l"), out("r", rec((right + 1) % 6, 0)))) == "FAIL"
+
+
+def test_job_kafka_keys_match_registry():
+    reg = config.topics()
+    for job in config.JOBS.values():
+        if not job.is_parquet:
+            assert "|".join(job.kafka_key) == reg[job.output]["key"]
 
 
 # ---------- E ----------

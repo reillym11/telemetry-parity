@@ -22,6 +22,7 @@ class Job:
     business_key: tuple
     time_field: str | None
     order_by: str
+    kafka_key: tuple = ("vin",)
 
     @property
     def is_parquet(self):
@@ -30,12 +31,16 @@ class Job:
     def key_of(self, value: dict) -> str:
         return "|".join(str(value[f]) for f in self.business_key)
 
+    def kafka_key_of(self, value: dict) -> str:
+        return "|".join(str(value.get(f)) for f in self.kafka_key)
+
 
 JOBS = {
     j.name: j
     for j in [
         Job("ota-status-tracker", "vehicle.ota.status.v1", "ota.status.latest.v1",
-            "telemetry.jobs.ota.OtaStatusTracker", ("vin", "campaign_id"), "last_event_time", "key"),
+            "telemetry.jobs.ota.OtaStatusTracker", ("vin", "campaign_id"), "last_event_time", "key",
+            ("vin", "campaign_id")),
         Job("charging-session-builder", "vehicle.charging.events.v1", "charging.sessions.v1",
             "telemetry.jobs.charging.ChargingSessionBuilder", ("session_id",), "start_time", "vin"),
         Job("battery-health-aggregator", "vehicle.battery.health.v1", "battery.health.hourly",

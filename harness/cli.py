@@ -212,6 +212,14 @@ class Run:
 
     def legacy_only(self):
         legacy = self.legacy_side()
+        summary = self.summary(legacy)
+        (self.dir / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+        schema_bad = [r.raw or r.value for r in legacy.records if self.schema_errors(r)]
+        res2 = checks.result("S", "Legacy output validates against the schema", "FAIL" if schema_bad else "PASS",
+                             {"invalid_records": len(schema_bad)}, [str(x)[:200] for x in schema_bad[:20]])
+        if schema_bad:
+            res = checks.result("G", "Golden written", "FAIL", explanation="Golden left unchanged: output is invalid.")
+            return self.finish("legacy-only", [res, res2])
         g = self.golden_dir()
         shutil.rmtree(g, ignore_errors=True)
         g.mkdir(parents=True)
@@ -219,14 +227,9 @@ class Run:
             shutil.copytree(self.dir / "legacy" / "parquet", g / "parquet")
         else:
             shutil.copy(self.dir / "legacy" / f"{self.job.output}.jsonl", g / "output.jsonl")
-        summary = self.summary(legacy)
         (g / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
-        (self.dir / "summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
         res = checks.result("G", "Golden written", "PASS", {k: v for k, v in summary.items() if k != "deps"},
                             explanation=None)
-        schema_bad = [r.raw or r.value for r in legacy.records if self.schema_errors(r)]
-        res2 = checks.result("S", "Legacy output validates against the schema", "FAIL" if schema_bad else "PASS",
-                             {"invalid_records": len(schema_bad)}, [str(x)[:200] for x in schema_bad[:20]])
         return self.finish("legacy-only", [res, res2])
 
     def schema_errors(self, rec):
@@ -312,15 +315,18 @@ class Run:
             finally:
                 self.docker.logs(name, self.dir / "rust-job.log")
                 self.docker.remove(name)
-        if code != 0:
-            tail = "\n".join((self.dir / "rust-job.log").read_text(errors="replace").splitlines()[-30:])
-            raise HarnessError(f"rust job exited with {code}; see {self.dir / 'rust-job.log'}\n{tail}")
         ends = self.kafka.end_offsets(self.job.input_topic)
         committed = self.kafka.committed(group, self.job.input_topic)
         caught_up = all(committed.get(p, 0) >= e for p, e in ends.items())
-        r = checks.result("R", "R. Rust job exited 0 and caught up", "PASS" if caught_up else "FAIL",
-                          {"input_end_offsets": sum(ends.values()), "committed": sum(committed.values())},
-                          explanation=None if caught_up else "Committed offsets are behind the input end offsets.")
+        why = []
+        if code != 0:
+            tail = (self.dir / "rust-job.log").read_text(errors="replace").splitlines()[-5:]
+            why.append(f"Rust job exited with {code}; see rust-job.log. Last lines: " + " | ".join(tail))
+        if not caught_up:
+            why.append("Committed offsets are behind the input end offsets.")
+        r = checks.result("R", "R. Rust job exited 0 and caught up", "FAIL" if why else "PASS",
+                          {"exit_code": code, "input_end_offsets": sum(ends.values()),
+                           "committed": sum(committed.values())}, explanation=" ".join(why) or None)
 
         with self.step("capture"):
             rust = self.capture("rust")

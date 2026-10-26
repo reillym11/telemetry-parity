@@ -16,6 +16,7 @@ variables:
   DOCKER_HOST: tcp://docker:2375
   DOCKER_TLS_CERTDIR: ""
   KAFKA_EXTERNAL_HOST: docker
+  BIND_HOST: 0.0.0.0
 
 unit:
   stage: unit
@@ -57,7 +58,7 @@ golden:
   extends: .docker
   stage: golden
   script:
-    - for j in ota-status-tracker charging-session-builder battery-health-aggregator diagnostics-dtc-router; do ./run.sh --job $j --fixture sample --legacy-only; done
+    - for j in ota-status-tracker charging-session-builder battery-health-aggregator diagnostics-dtc-router; do ./run.sh --job $j --fixture sample --legacy-only || exit 1; done
     - ./run.sh --job charging-session-builder --fixture sample --determinism
 
 self-test:

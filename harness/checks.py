@@ -142,7 +142,7 @@ def check_a(job, legacy: Output, rust: Output, schema, title="A. Effective outpu
 
 def repeats(job, out: Output) -> int:
     if job.name == "ota-status-tracker":
-        seen = Counter((r.key, r.raw if r.raw is not None else canon(r.value, sorted(r.value))) for r in out.records)
+        seen = Counter((r.key, canon(r.value, sorted(r.value))) for r in out.records)
     else:
         seen = Counter(job.key_of(r.value) for r in out.records)
     return sum(c - 1 for c in seen.values() if c > 1)
@@ -194,18 +194,30 @@ def check_d(job, legacy: Output, rust: Output, partitions=6):
         lp[r.key].add(r.partition)
     for r in rust.records:
         rp[r.key].add(r.partition)
+    wrong_key = [{"offset": r.offset, "partition": r.partition, "key": r.key,
+                  "expected_key": job.kafka_key_of(r.value)}
+                 for r in rust.records if r.key != job.kafka_key_of(r.value)]
     bad = []
     for k in sorted(set(lp) & set(rp)):
         if lp[k] != rp[k]:
             bad.append({"key": k, "legacy": sorted(lp[k]), "rust": sorted(rp[k]),
                         "java_murmur2": java_partition(k.encode(), partitions)})
+    for k in sorted(set(rp) - set(lp)):
+        if k is not None and rp[k] != {java_partition(k.encode(), partitions)}:
+            bad.append({"key": k, "legacy": [], "rust": sorted(rp[k]),
+                        "java_murmur2": java_partition(k.encode(), partitions)})
     legacy_off = sum(1 for k, ps in lp.items() if k is not None and ps != {java_partition(k.encode(), partitions)})
-    return result("D", "D. Partition placement", FAIL if bad else PASS,
-                  {"keys_compared": len(set(lp) & set(rp)), "misplaced": len(bad),
-                   "legacy_not_murmur2_info": legacy_off}, bad[:MAX_DIFFS],
-                  ("Keys land on different partitions. Java clients (the legacy Spark sink) use murmur2 by default; "
+    why = []
+    if wrong_key:
+        why.append(f"{len(wrong_key)} Rust record(s) do not use the registry key ({'|'.join(job.kafka_key)}).")
+    if bad:
+        why.append("Keys land on different partitions. Java clients (the legacy Spark sink) use murmur2 by default; "
                    "librdkafka's default is consistent_random (CRC32). Set partitioner=murmur2_random in the Rust "
-                   "producer.") if bad else None)
+                   "producer.")
+    return result("D", "D. Partition placement", FAIL if bad or wrong_key else PASS,
+                  {"keys_compared": len(set(lp) & set(rp)), "misplaced": len(bad), "wrong_key": len(wrong_key),
+                   "legacy_not_murmur2_info": legacy_off}, (wrong_key + bad)[:MAX_DIFFS],
+                  " ".join(why) or None)
 
 
 # ---------- E. privacy ----------
