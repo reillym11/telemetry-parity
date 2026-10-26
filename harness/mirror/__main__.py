@@ -116,9 +116,9 @@ def main():
                          "auto.offset.reset": "earliest", "isolation.level": "read_committed"})
     tps = []
     for t in inputs:
-        for p in sorted(consumer.list_topics(t, timeout=10).topics[t].partitions):
+        for p in sorted(retry(lambda t=t: consumer.list_topics(t, timeout=10)).topics[t].partitions):
             tps.append(TopicPartition(t, p))
-    ends = {(tp.topic, tp.partition): consumer.get_watermark_offsets(tp, timeout=10)[1] for tp in tps}
+    ends = {(tp.topic, tp.partition): retry(lambda tp=tp: consumer.get_watermark_offsets(tp, timeout=10))[1] for tp in tps}
     total = sum(ends.values())
     committed = {(tp.topic, tp.partition): max(tp.offset, 0) for tp in retry(lambda: consumer.committed(tps, timeout=10))}
     c0 = sum(committed.values())
