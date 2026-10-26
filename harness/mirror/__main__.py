@@ -10,6 +10,7 @@ import os
 import re
 import sys
 import tempfile
+import time
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
@@ -17,7 +18,7 @@ import boto3
 import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
-from confluent_kafka import Consumer, Producer, TopicPartition
+from confluent_kafka import Consumer, KafkaException, Producer, TopicPartition
 from confluent_kafka.admin import AdminClient, NewTopic
 
 TIME_FIELD = {"charging.sessions.v1": "start_time", "service.dtc.alerts.v1": "event_time",
@@ -90,6 +91,19 @@ def apply_faults(recs, fault, topic):
     return recs
 
 
+def retry(fn, seconds=60):
+    # a fresh broker answers NOT_COORDINATOR / COORDINATOR_LOAD_IN_PROGRESS until __consumer_offsets is ready
+    deadline = time.monotonic() + seconds
+    while True:
+        try:
+            return fn()
+        except KafkaException as e:
+            if time.monotonic() > deadline:
+                raise
+            log(f"retrying after {e}")
+            time.sleep(1)
+
+
 def main():
     fault = env.get("MIRROR_FAULT", "none")
     if fault not in FAULTS:
@@ -106,7 +120,7 @@ def main():
             tps.append(TopicPartition(t, p))
     ends = {(tp.topic, tp.partition): consumer.get_watermark_offsets(tp, timeout=10)[1] for tp in tps}
     total = sum(ends.values())
-    committed = {(tp.topic, tp.partition): max(tp.offset, 0) for tp in consumer.committed(tps, timeout=10)}
+    committed = {(tp.topic, tp.partition): max(tp.offset, 0) for tp in retry(lambda: consumer.committed(tps, timeout=10))}
     c0 = sum(committed.values())
     restart = c0 > 0
     log(f"start: input end offsets={total} committed={c0} restart={restart} fault={fault}")

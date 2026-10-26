@@ -2,7 +2,7 @@ import json
 import time
 from dataclasses import dataclass
 
-from confluent_kafka import Consumer, KafkaError, Producer, TopicPartition
+from confluent_kafka import Consumer, KafkaError, KafkaException, Producer, TopicPartition
 from confluent_kafka.admin import AdminClient, NewTopic
 
 from harness.murmur2 import java_partition
@@ -57,7 +57,14 @@ class Kafka:
         parts = [TopicPartition(topic, p) for p in self.partitions(topic)]
         c = consumer or self.offset_reader(group)
         try:
-            return {tp.partition: max(tp.offset, 0) for tp in c.committed(parts, timeout=10)}
+            deadline = time.monotonic() + 60
+            while True:
+                try:
+                    return {tp.partition: max(tp.offset, 0) for tp in c.committed(parts, timeout=10)}
+                except KafkaException:
+                    if time.monotonic() > deadline:
+                        raise
+                    time.sleep(1)
         finally:
             if consumer is None:
                 c.close()
