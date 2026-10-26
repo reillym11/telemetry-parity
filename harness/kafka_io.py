@@ -19,18 +19,6 @@ class Message:
         return {"partition": self.partition, "offset": self.offset, "key": self.key, "value": self.raw}
 
 
-def retry(fn, seconds=60):
-    # transient on a freshly started broker: transport failures and NOT_COORDINATOR / COORDINATOR_LOAD_IN_PROGRESS
-    deadline = time.monotonic() + seconds
-    while True:
-        try:
-            return fn()
-        except KafkaException:
-            if time.monotonic() > deadline:
-                raise
-            time.sleep(1)
-
-
 class Kafka:
     def __init__(self, bootstrap: str):
         self.bootstrap = bootstrap
@@ -61,8 +49,7 @@ class Kafka:
         c = Consumer({"bootstrap.servers": self.bootstrap, "group.id": "parity-probe", "enable.auto.commit": False,
                       "log_level": 3})
         try:
-            return retry(lambda: {p: c.get_watermark_offsets(TopicPartition(topic, p), timeout=10)[1]
-                                  for p in self.partitions(topic)})
+            return {p: c.get_watermark_offsets(TopicPartition(topic, p), timeout=10)[1] for p in self.partitions(topic)}
         finally:
             c.close()
 
@@ -70,7 +57,14 @@ class Kafka:
         parts = [TopicPartition(topic, p) for p in self.partitions(topic)]
         c = consumer or self.offset_reader(group)
         try:
-            return retry(lambda: {tp.partition: max(tp.offset, 0) for tp in c.committed(parts, timeout=10)})
+            deadline = time.monotonic() + 60
+            while True:
+                try:
+                    return {tp.partition: max(tp.offset, 0) for tp in c.committed(parts, timeout=10)}
+                except KafkaException:
+                    if time.monotonic() > deadline:
+                        raise
+                    time.sleep(1)
         finally:
             if consumer is None:
                 c.close()
