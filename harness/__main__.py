@@ -1,5 +1,8 @@
+import faulthandler
 import sys
 import traceback
+
+faulthandler.enable()
 
 try:
     from harness.cli import main

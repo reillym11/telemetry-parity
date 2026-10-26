@@ -313,7 +313,8 @@ class Run:
                 self.docker.logs(name, self.dir / "rust-job.log")
                 self.docker.remove(name)
         if code != 0:
-            raise HarnessError(f"rust job exited with {code}; see {self.dir / 'rust-job.log'}")
+            tail = "\n".join((self.dir / "rust-job.log").read_text(errors="replace").splitlines()[-30:])
+            raise HarnessError(f"rust job exited with {code}; see {self.dir / 'rust-job.log'}\n{tail}")
         ends = self.kafka.end_offsets(self.job.input_topic)
         committed = self.kafka.committed(group, self.job.input_topic)
         caught_up = all(committed.get(p, 0) >= e for p, e in ends.items())
@@ -389,20 +390,23 @@ class Run:
         target = math.ceil(self.a.chaos_at * total)
         timeline = [{"event": "rust job started", "detail": f"input end offsets total={total}, kill at >= {target}"}]
         i = 0
+        reader = self.kafka.offset_reader(group)
         while True:
             try:
-                c = self.kafka.committed(group, self.job.input_topic)
+                c = self.kafka.committed(group, self.job.input_topic, reader)
             except Exception:
                 c = {}
             if sum(c.values()) >= target:
                 self.docker.kill(name)
                 t_kill = dt.datetime.now(dt.timezone.utc)
-                at_kill = self.kafka.committed(group, self.job.input_topic)
+                at_kill = self.kafka.committed(group, self.job.input_topic, reader)
+                reader.close()
                 break
             i += 1
             if i % 10 == 0:
                 state = self.docker.docker("inspect", "-f", "{{.State.Running}}", name, capture=True).stdout.strip()
                 if state != "true":
+                    reader.close()
                     raise HarnessError(f"rust job exited before committed offsets reached {target}/{total}")
             time.sleep(0.02)
         timeline.append({"event": "SIGKILL", "detail": f"{t_kill.isoformat()} committed={sum(at_kill.values())}/"

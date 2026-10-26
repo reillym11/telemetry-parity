@@ -2,7 +2,7 @@ import json
 import time
 from dataclasses import dataclass
 
-from confluent_kafka import Consumer, ConsumerGroupTopicPartitions, KafkaError, Producer, TopicPartition
+from confluent_kafka import Consumer, KafkaError, Producer, TopicPartition
 from confluent_kafka.admin import AdminClient, NewTopic
 
 from harness.murmur2 import java_partition
@@ -53,11 +53,18 @@ class Kafka:
         finally:
             c.close()
 
-    def committed(self, group, topic) -> dict:
+    def committed(self, group, topic, consumer=None) -> dict:
         parts = [TopicPartition(topic, p) for p in self.partitions(topic)]
-        f = self.admin.list_consumer_group_offsets([ConsumerGroupTopicPartitions(group, parts)])[group]
-        res = f.result(timeout=10)
-        return {tp.partition: max(tp.offset, 0) for tp in res.topic_partitions}
+        c = consumer or self.offset_reader(group)
+        try:
+            return {tp.partition: max(tp.offset, 0) for tp in c.committed(parts, timeout=10)}
+        finally:
+            if consumer is None:
+                c.close()
+
+    def offset_reader(self, group) -> Consumer:
+        return Consumer({"bootstrap.servers": self.bootstrap, "group.id": group, "enable.auto.commit": False,
+                         "log_level": 3})
 
     def load_fixture(self, path, topic, partitions) -> dict:
         """Produces each line keyed by vin in file order with the Java-compatible murmur2 partitioner."""

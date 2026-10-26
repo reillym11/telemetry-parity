@@ -67,6 +67,8 @@ self-test:
   script:
     - ./run.sh --job charging-session-builder --fixture full --legacy-only
     - python -m pytest -q harness/tests -m e2e
+  after_script:
+    - for f in runs/*/harness-error.txt; do [ -f "$f" ] && { echo "== $f"; cat "$f"; d=$(dirname "$f"); [ -f "$d/rust-job.log" ] && tail -n 40 "$d/rust-job.log"; }; done; true
 
 parity:
   extends: .docker
