@@ -5,7 +5,7 @@ services:
   kafka:
     image: apache/kafka:3.9.1
     ports:
-      - "${BIND_HOST:-127.0.0.1}:9094:9094"
+      - "${KAFKA_PUBLISH:-127.0.0.1:9094}:9094"
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -28,7 +28,7 @@ services:
   minio:
     image: bitnamilegacy/minio:2025.7.23
     ports:
-      - "${BIND_HOST:-127.0.0.1}:9000:9000"
+      - "${MINIO_PUBLISH:-127.0.0.1:9000}:9000"
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin

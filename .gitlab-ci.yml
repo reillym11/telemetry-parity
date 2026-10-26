@@ -16,7 +16,9 @@ variables:
   DOCKER_HOST: tcp://docker:2375
   DOCKER_TLS_CERTDIR: ""
   KAFKA_EXTERNAL_HOST: docker
-  BIND_HOST: 0.0.0.0
+  # publish on every interface: the `docker` alias resolves to IPv4 and IPv6, and a 0.0.0.0 bind refuses the IPv6 half
+  KAFKA_PUBLISH: "9094"
+  MINIO_PUBLISH: "9000"
 
 unit:
   stage: unit
