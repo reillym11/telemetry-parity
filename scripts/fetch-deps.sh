@@ -1,16 +1,12 @@
 #!/usr/bin/env bash
-# Clones the commits pinned in deps.lock into .deps/. In CI the clone authenticates with CI_JOB_TOKEN.
+# Clones the commits pinned in deps.lock into .deps/. GIT_BASE overrides where the repos are cloned from.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 # shellcheck disable=SC1091
 source deps.lock
 
-if [[ -n "${CI_JOB_TOKEN:-}" ]]; then
-  base="${GIT_BASE:-https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.com/congition-demo-group}"
-else
-  base="${GIT_BASE:-https://gitlab.com/congition-demo-group}"
-fi
+base="${GIT_BASE:-https://github.com/reillym11}"
 
 fetch() {
   local name="$1" sha="$2" dir=".deps/$1"

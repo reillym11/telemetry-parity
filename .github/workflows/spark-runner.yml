@@ -1,0 +1,39 @@
+# Builds and publishes the legacy Spark runner image for the pinned telemetry-spark-jobs commit. Runs when
+# the pin or the runner's build inputs change, and replaces the tag so consumers never get a stale runner.
+name: spark-runner
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - deps.lock
+      - docker/spark-runner/**
+      - .github/workflows/spark-runner.yml
+
+# A newer run cancels an older one, so an older build never replaces the tag last.
+concurrency:
+  group: spark-runner
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/fetch-deps.sh
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: |
+          source deps.lock
+          img="ghcr.io/${{ github.repository }}/spark-runner:${TELEMETRY_SPARK_JOBS_SHA:0:12}"
+          SPARK_RUNNER_IMAGE="$img" docker compose --profile jobs build spark-runner
+          docker push "$img"
