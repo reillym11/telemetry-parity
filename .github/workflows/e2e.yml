@@ -4,7 +4,7 @@ name: e2e
 on:
   workflow_dispatch:
   pull_request:
-    paths: &paths
+    paths:
       - harness/**
       - docker/**
       - docker-compose.yml
@@ -17,7 +17,17 @@ on:
       - .github/workflows/e2e.yml
   push:
     branches: [main]
-    paths: *paths
+    paths:
+      - harness/**
+      - docker/**
+      - docker-compose.yml
+      - run.sh
+      - deps.lock
+      - golden/**
+      - requirements.txt
+      - pytest.ini
+      - scripts/**
+      - .github/workflows/e2e.yml
 
 concurrency:
   group: e2e-${{ github.ref }}
