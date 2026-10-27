@@ -4,6 +4,7 @@ from decimal import Decimal
 import pytest
 
 from harness import checks, config
+from harness.cli import failpoint_exit_error
 from harness.checks import Output, Rec, parse
 from harness.config import JOBS
 from harness.murmur2 import java_partition, murmur2
@@ -218,3 +219,9 @@ def test_e4_manifest_mismatch():
     assert status(checks.check_e4(dict(observed), observed)) == "PASS"
     r = checks.check_e4({**observed, "state_stores": ["rust.job.state.x"]}, observed)
     assert status(r) == "FAIL" and r["metrics"]["mismatches"] == 1
+
+
+def test_failpoint_requires_sigkill_exit():
+    assert failpoint_exit_error(137, 10) is None
+    assert "never fired" in str(failpoint_exit_error(0, 10))
+    assert "exited 1" in str(failpoint_exit_error(1, 10))
