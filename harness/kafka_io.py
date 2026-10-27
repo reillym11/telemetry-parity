@@ -13,7 +13,13 @@ class Message:
     partition: int
     offset: int
     key: str | None
-    raw: str
+    raw: str | None  # None for a tombstone
+
+    @classmethod
+    def from_kafka(cls, msg):
+        key, value = msg.key(), msg.value()
+        return cls(msg.partition(), msg.offset(), key.decode() if key is not None else None,
+                   value.decode() if value is not None else None)
 
     def as_json(self):
         return {"partition": self.partition, "offset": self.offset, "key": self.key, "value": self.raw}
@@ -118,8 +124,7 @@ class Kafka:
                         continue
                     raise RuntimeError(str(msg.error()))
                 done.discard(msg.partition())
-                out.append(Message(msg.partition(), msg.offset(),
-                                   msg.key().decode() if msg.key() is not None else None, msg.value().decode()))
+                out.append(Message.from_kafka(msg))
         finally:
             c.close()
         return sorted(out, key=lambda m: (m.partition, m.offset))

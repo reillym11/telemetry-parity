@@ -7,6 +7,7 @@ from harness import checks, config
 from harness.cli import failpoint_exit_error
 from harness.checks import Output, Rec, parse
 from harness.config import JOBS
+from harness.kafka_io import Message
 from harness.murmur2 import java_partition, murmur2
 
 CHARGING = JOBS["charging-session-builder"]
@@ -219,6 +220,35 @@ def test_e4_manifest_mismatch():
     assert status(checks.check_e4(dict(observed), observed)) == "PASS"
     r = checks.check_e4({**observed, "state_stores": ["rust.job.state.x"]}, observed)
     assert status(r) == "FAIL" and r["metrics"]["mismatches"] == 1
+
+
+def test_e4_parquet_output_name_is_run_independent():
+    run_id = "20261027T224103Z-battery-health-aggregator-769e"
+    assert checks.manifest_name(f"{run_id}/rust/battery_health_hourly", run_id) == "rust/battery_health_hourly"
+    assert checks.manifest_name("rust.job.state.x", run_id) == "rust.job.state.x"
+
+
+class FakeKafkaMessage:
+    def __init__(self, key, value):
+        self._key, self._value = key, value
+
+    def partition(self):
+        return 1
+
+    def offset(self):
+        return 7
+
+    def key(self):
+        return self._key
+
+    def value(self):
+        return self._value
+
+
+def test_capture_keeps_tombstones():
+    m = Message.from_kafka(FakeKafkaMessage(b'"evt-1"', None))
+    assert (m.partition, m.offset, m.key, m.raw) == (1, 7, '"evt-1"', None)
+    assert checks.scan_sensitive([m.raw, '{"vin": "x"}'], {"vin": "vehicle-id"}) == {"vin": "vehicle-id"}
 
 
 def test_failpoint_requires_sigkill_exit():

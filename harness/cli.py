@@ -390,10 +390,11 @@ class Run:
         ]
         out_sensitive = {f: p["x-privacy"] for f, p in self.schema["properties"].items()
                          if p.get("x-privacy", "none") != "none"}
-        observed = {"inputs": [self.job.input_topic], "outputs": [declared_out],
-                    "state_stores": sorted(s["name"] for s in stores if s["name"] != declared_out),
-                    "sensitive_fields": {declared_out: sorted(out_sensitive),
-                                         **{k: sorted(v) for k, v in state_scan.items()}}}
+        name = lambda n: checks.manifest_name(n, self.run_id)
+        observed = {"inputs": [self.job.input_topic], "outputs": [name(declared_out)],
+                    "state_stores": sorted(name(s["name"]) for s in stores if s["name"] != declared_out),
+                    "sensitive_fields": {name(declared_out): sorted(out_sensitive),
+                                         **{name(k): sorted(v) for k, v in state_scan.items()}}}
         manifest = yaml.safe_load(self.a.manifest.read_text()) if self.a.manifest else None
         results.append(checks.check_e4(manifest, observed))
         if chaos:
