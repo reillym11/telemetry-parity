@@ -122,6 +122,10 @@ def main():
             tps.append(TopicPartition(t, p))
     ends = {(tp.topic, tp.partition): consumer.get_watermark_offsets(tp, timeout=10)[1] for tp in tps}
     total = sum(ends.values())
+    if env.get("OUTPUT_TOPIC"):
+        # fence a killed run first: its open transaction holds pending offsets, and a read_committed committed()
+        # waits on those until transaction.timeout.ms aborts it
+        Producer({"bootstrap.servers": boot, "transactional.id": env["TRANSACTIONAL_ID"]}).init_transactions(30)
     committed = {(tp.topic, tp.partition): max(tp.offset, 0) for tp in retry(lambda: consumer.committed(tps, timeout=10))}
     c0 = sum(committed.values())
     restart = c0 > 0
@@ -168,8 +172,7 @@ def main():
         log(f"new-sink: writing a copy of every record to {side}")
 
     if fault == "duplicate" and restart and out_topic:
-        # fence the killed producer so its open transaction is aborted, then misbehave without transactions
-        Producer({"bootstrap.servers": boot, "transactional.id": env["TRANSACTIONAL_ID"]}).init_transactions(30)
+        # the killed producer is already fenced above; misbehave without transactions
         log(f"duplicate: re-emitting {n_prev} records without a transaction")
         for k, v in recs[:n_prev]:
             producer.produce(out_topic, key=k.encode(), value=v.encode())
