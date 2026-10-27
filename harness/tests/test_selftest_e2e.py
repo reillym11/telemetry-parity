@@ -9,6 +9,7 @@ from harness.cli import FAULT_FAILS
 from harness.config import ROOT, RUNS
 
 pytestmark = pytest.mark.e2e
+CASE_TIMEOUT = 1200
 
 CASES = [("charging-session-builder", "sample", f, f == "none") for f in FAULT_FAILS if f != "reorder"]
 CASES += [(j, "sample", "none", True) for j in ("ota-status-tracker", "battery-health-aggregator",
@@ -20,7 +21,15 @@ CASES += [("charging-session-builder", "full", "reorder", False)]
 def run_harness(*extra):
     before = set(RUNS.glob("*")) if RUNS.exists() else set()
     args = [sys.executable, "-m", "harness", "--legacy-from-golden", *extra]
-    proc = subprocess.run(args, cwd=ROOT, capture_output=True, text=True)
+    try:
+        proc = subprocess.run(args, cwd=ROOT, capture_output=True, text=True, timeout=CASE_TIMEOUT)
+    except subprocess.TimeoutExpired as e:
+        new = sorted(set(RUNS.glob("*")) - before)
+        log = (new[-1] / "harness.log").read_text(errors="replace")[-3000:] if new else ""
+        job = subprocess.run(["docker", "logs", "--tail", "40", f"parity-rust-{extra[1]}"], capture_output=True,
+                             text=True)
+        pytest.fail(f"harness did not finish in {CASE_TIMEOUT} s\nstdout: {e.stdout}\nharness.log: {log}\n"
+                    f"rust job: {job.stdout}{job.stderr}")
     new = sorted(set(RUNS.glob("*")) - before)
     assert new, proc.stdout + proc.stderr
     path = new[-1] / "parity-report.json"
