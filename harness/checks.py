@@ -293,6 +293,11 @@ def check_e3(stores: list, declared_output: str, state_prefix: str, state_scan: 
                   if undeclared else None)
 
 
+def manifest_name(name: str, run_id: str) -> str:
+    """Drop the per-run S3 prefix so a committed manifest can name a Parquet output."""
+    return name.removeprefix(f"{run_id}/")
+
+
 def check_e4(manifest: dict | None, observed: dict):
     if manifest is None:
         return result("E4", "E4. Privacy manifest", NA, explanation="No --manifest given.")
