@@ -178,10 +178,7 @@ def main():
             producer.produce(out_topic, key=k.encode(), value=v.encode())
         producer.flush(30)
 
-    assigned = []
-    consumer.subscribe(inputs, on_assign=lambda c, parts: assigned.extend(parts))
-    while not assigned:
-        consumer.poll(0.2)
+    consumer.subscribe(inputs)
     pos = dict(committed)
     while True:
         msgs = consumer.consume(batch, timeout=1.0)
