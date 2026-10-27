@@ -1,0 +1,67 @@
+# Golden replays and the end-to-end self-test. Runs only when the harness, its images or its pins change.
+name: e2e
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: &paths
+      - harness/**
+      - docker/**
+      - docker-compose.yml
+      - run.sh
+      - deps.lock
+      - golden/**
+      - requirements.txt
+      - pytest.ini
+      - scripts/**
+      - .github/workflows/e2e.yml
+  push:
+    branches: [main]
+    paths: *paths
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - run: pip install -r requirements.txt
+      - run: scripts/fetch-deps.sh
+      - name: Spark runner image (built locally by the harness if not on ghcr.io)
+        run: |
+          source deps.lock
+          img="ghcr.io/${{ github.repository }}/spark-runner:${TELEMETRY_SPARK_JOBS_SHA:0:12}"
+          if docker pull -q "$img"; then echo "SPARK_RUNNER_IMAGE=$img" >> "$GITHUB_ENV"; fi
+      - name: golden
+        run: |
+          for f in sample edge; do
+            for j in ota-status-tracker charging-session-builder battery-health-aggregator diagnostics-dtc-router; do
+              ./run.sh --job $j --fixture $f --legacy-only || exit 1
+            done
+          done
+          ./run.sh --job charging-session-builder --fixture sample --determinism
+      - name: self-test
+        run: |
+          ./run.sh --job charging-session-builder --fixture full --legacy-only
+          python -m pytest -q harness/tests -m e2e
+      - name: Harness errors
+        if: failure()
+        run: for f in runs/*/harness-error.txt; do [ -f "$f" ] && { echo "== $f"; cat "$f"; d=$(dirname "$f"); [ -f "$d/rust-job.log" ] && tail -n 40 "$d/rust-job.log"; }; done; true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: parity-report
+          path: runs/
+          retention-days: 30
