@@ -69,9 +69,11 @@ class Kafka:
             if consumer is None:
                 c.close()
 
-    def offset_reader(self, group) -> Consumer:
+    def offset_reader(self, group, isolation="read_committed") -> Consumer:
+        # read_committed waits for an open transaction's pending offsets (require_stable), so after a kill
+        # mid-transaction it times out; read_uncommitted returns the last committed offsets at once
         return Consumer({"bootstrap.servers": self.bootstrap, "group.id": group, "enable.auto.commit": False,
-                         "log_level": 3})
+                         "isolation.level": isolation, "log_level": 3})
 
     def load_fixture(self, path, topic, partitions) -> dict:
         """Produces each line keyed by vin in file order with the Java-compatible murmur2 partitioner."""
