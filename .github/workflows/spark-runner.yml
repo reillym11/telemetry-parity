@@ -11,6 +11,11 @@ on:
       - docker/spark-runner/**
       - .github/workflows/spark-runner.yml
 
+# A newer run cancels an older one, so an older build never replaces the tag last.
+concurrency:
+  group: spark-runner
+  cancel-in-progress: true
+
 permissions:
   contents: read
   packages: write
