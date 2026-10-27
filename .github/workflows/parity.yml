@@ -14,6 +14,9 @@ permissions:
 jobs:
   parity:
     runs-on: ubuntu-latest
+    env:
+      # runners map localhost to ::1 too, where the 127.0.0.1-bound Kafka and MinIO ports refuse connections
+      KAFKA_EXTERNAL_HOST: 127.0.0.1
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
