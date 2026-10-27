@@ -65,6 +65,16 @@ def main(argv=None):
         return 2
 
 
+def failpoint_exit_error(code, target):
+    if code == 137:
+        return None
+    if code == 0:
+        return HarnessError(f"rust job exited 0 with TELEMETRY_FAILPOINT_AT_OFFSETS={target}, so the failpoint "
+                            "never fired; the image must implement it (docs/RUST_JOB_CONTRACT.md).")
+    return HarnessError(f"rust job exited {code} with TELEMETRY_FAILPOINT_AT_OFFSETS={target}, not 137 (SIGKILL), "
+                        "so it failed for another reason before the failpoint; see rust-job.log.")
+
+
 class Run:
     def __init__(self, args, argv):
         self.a = args
@@ -473,9 +483,9 @@ class Run:
             at_crash = self.kafka.committed(group, self.job.input_topic, reader)
         finally:
             reader.close()
-        if code == 0:
-            raise HarnessError(f"rust job exited 0 with TELEMETRY_FAILPOINT_AT_OFFSETS={target}, so the failpoint "
-                               "never fired; the image must implement it (docs/RUST_JOB_CONTRACT.md).")
+        if err := failpoint_exit_error(code, target):
+            self.docker.logs(name, self.dir / "rust-job.log")
+            raise err
         timeline.append({"event": f"failpoint crash (exit {code})",
                          "detail": f"{t_crash.isoformat()} committed={sum(at_crash.values())}/{total} "
                                    f"per partition={dict(sorted(at_crash.items()))}"})

@@ -31,7 +31,7 @@ A Rust port of a legacy job is a container image that the parity harness starts 
 6. Output values must match the schema and the legacy job exactly. Fields are the declared schema fields, no more and no fewer.
 7. Any Kafka topic the job creates must start with `STATE_TOPIC_PREFIX`. The job writes nowhere else.
 8. Exit 0 once committed offsets reach the end offsets recorded at startup.
-9. Failpoint (test only): when `TELEMETRY_FAILPOINT_AT_OFFSETS=N` is set, in the first transaction whose committed input offsets would reach `N`, produce the outputs and state records, call `send_offsets_to_transaction`, flush the producer, then SIGKILL the process before `commit_transaction`. Unset means no failpoint. The harness runs the image with an init process (`init: true`), so the job is not PID 1 and its own SIGKILL terminates it. It treats the crash as the kill and restarts the job without the variable.
+9. Failpoint (test only): when `TELEMETRY_FAILPOINT_AT_OFFSETS=N` is set, in the first transaction whose committed input offsets would reach `N`, produce the outputs and state records, call `send_offsets_to_transaction`, flush the producer, then SIGKILL the process before `commit_transaction`. Unset means no failpoint. The harness runs the image with an init process (`init: true`), so the job is not PID 1 and its own SIGKILL terminates it. It treats exit code 137 (SIGKILL) as the kill and restarts the job without the variable. Any other exit is a harness error.
 
 The harness checks completion itself through the consumer group's committed offsets; it does not trust the exit code alone.
 
