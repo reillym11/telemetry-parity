@@ -1,4 +1,5 @@
-# Publishes the legacy Spark runner image for the pinned telemetry-spark-jobs commit, once per commit.
+# Builds and publishes the legacy Spark runner image for the pinned telemetry-spark-jobs commit. Runs when
+# the pin or the runner's build inputs change, and replaces the tag so consumers never get a stale runner.
 name: spark-runner
 
 on:
@@ -29,6 +30,5 @@ jobs:
       - run: |
           source deps.lock
           img="ghcr.io/${{ github.repository }}/spark-runner:${TELEMETRY_SPARK_JOBS_SHA:0:12}"
-          if docker manifest inspect "$img" >/dev/null 2>&1; then echo "$img already published"; exit 0; fi
           SPARK_RUNNER_IMAGE="$img" docker compose --profile jobs build spark-runner
           docker push "$img"
