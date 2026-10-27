@@ -35,6 +35,9 @@ def parse_args(argv):
     p.add_argument("--legacy-only", action="store_true")
     p.add_argument("--chaos", action="store_true")
     p.add_argument("--chaos-at", type=float, default=0.4)
+    p.add_argument("--chaos-mode", choices=["kill", "failpoint"], default="kill",
+                   help="kill: SIGKILL from outside once committed offsets reach --chaos-at; "
+                        "failpoint: the job kills itself before committing (TELEMETRY_FAILPOINT_AT_OFFSETS)")
     p.add_argument("--self-test", choices=FAULTS)
     p.add_argument("--determinism", action="store_true")
     p.add_argument("--manifest", type=Path, help="privacy-manifest.yaml for check E4")
@@ -306,10 +309,16 @@ class Run:
         name = f"parity-rust-{self.job.name}"
         self.docker.remove(name)
         chaos = None
+        failpoint = self.a.chaos and self.a.chaos_mode == "failpoint"
         with self.step("rust job"):
-            self.docker.start_rust(name, image, env, self.log)
+            first = dict(env)
+            if failpoint:
+                first["TELEMETRY_FAILPOINT_AT_OFFSETS"] = str(self.chaos_target()[1])
+            self.docker.start_rust(name, image, first, self.log)
             try:
-                if self.a.chaos:
+                if failpoint:
+                    chaos = self.failpoint(name, group, image, env)
+                elif self.a.chaos:
                     chaos = self.chaos(name, group)
                 code = self.docker.wait(name)
             finally:
@@ -334,6 +343,14 @@ class Run:
             if not self.job.is_parquet:
                 aborted = len(self.kafka.capture(self.output_topic("rust"), "read_uncommitted")) - len(rust.records)
         after = self.stores()
+        aborted_by_topic = {}
+        if self.a.chaos:
+            counted = [t for t in sorted(after[0]) if t.startswith(state_prefix)]
+            if not self.job.is_parquet:
+                counted.insert(0, self.output_topic("rust"))
+            for t in counted:
+                aborted_by_topic[t] = (len(self.kafka.capture(t, "read_uncommitted"))
+                                       - len(self.kafka.capture(t, "read_committed")))
         new_topics = sorted(after[0] - before[0])
         new_keys = sorted(after[1] - before[1])
         declared_out = env.get("OUTPUT_TOPIC") or self.s3_prefix("rust")
@@ -370,30 +387,46 @@ class Run:
         manifest = yaml.safe_load(self.a.manifest.read_text()) if self.a.manifest else None
         results.append(checks.check_e4(manifest, observed))
         if chaos:
-            chaos["timeline"].append({"event": "aborted-transaction records (read_uncommitted - read_committed)",
-                                      "detail": str(aborted)})
+            for t, n in aborted_by_topic.items():
+                chaos["timeline"].append({"event": f"aborted-transaction records on `{t}` "
+                                                   "(read_uncommitted - read_committed)", "detail": str(n)})
             dup = results[2]["metrics"]["rust_duplicates"]
             chaos["timeline"].append({"event": "duplicates after restart (check B)", "detail": str(dup)})
             results.append(checks.result("F", "F. Chaos summary (informational)", "PASS",
-                                         {"kill_committed_offsets": chaos["kill_committed_total"],
-                                          "input_total": chaos["input_total"], "aborted_records": aborted,
+                                         {"chaos_mode": chaos["mode"],
+                                          "kill_committed_offsets": chaos["kill_committed_total"],
+                                          "input_total": chaos["input_total"], "kill_time": chaos["kill_time"],
+                                          "restart_time": chaos["restart_time"], "aborted_records": aborted,
+                                          "aborted_records_by_topic": aborted_by_topic,
                                           "duplicates_after_restart": dup}))
         else:
             results.append(checks.result("F", "F. Chaos", "N/A", explanation="--chaos not set"))
         privacy = [{"name": declared_out, "kind": out_store["kind"], "sensitive_fields": out_sensitive}]
         privacy += [{"name": k, "kind": "state topic", "sensitive_fields": v} for k, v in state_scan.items()]
         mode = f"self-test:{self.a.self_test}" if self.a.self_test else "parity"
-        extra = {"rust_image": image, "chaos": chaos, "privacy": privacy, "aborted_records": aborted}
+        extra = {"rust_image": image, "chaos": chaos, "privacy": privacy, "aborted_records": aborted,
+                 "aborted_records_by_topic": aborted_by_topic}
         if self.a.self_test:
             failed = sorted(c["id"] for c in results if c["status"] == "FAIL")
             extra["self_test"] = {"fault": self.a.self_test, "expected_fail": FAULT_FAILS[self.a.self_test],
                                   "actual_fail": failed, "as_expected": failed == FAULT_FAILS[self.a.self_test]}
-        return self.finish(mode + ("+chaos" if self.a.chaos else ""), results, **extra)
+        return self.finish(mode + (f"+chaos:{self.a.chaos_mode}" if self.a.chaos else ""), results, **extra)
+
+    def chaos_target(self):
+        total = sum(self.kafka.end_offsets(self.job.input_topic).values())
+        return total, math.ceil(self.a.chaos_at * total)
+
+    def exited_early(self, target, total):
+        return HarnessError(f"rust job exited before committed offsets reached {target}/{total}, so the kill "
+                            "could not land. The job finished too fast for kill mode; rerun with --chaos-mode "
+                            "failpoint (TELEMETRY_FAILPOINT_AT_OFFSETS in docs/RUST_JOB_CONTRACT.md).")
+
+    def running(self, name):
+        r = self.docker.docker("inspect", "-f", "{{.State.Running}}", name, capture=True, check=False)
+        return r.stdout.strip() == "true"
 
     def chaos(self, name, group):
-        ends = self.kafka.end_offsets(self.job.input_topic)
-        total = sum(ends.values())
-        target = math.ceil(self.a.chaos_at * total)
+        total, target = self.chaos_target()
         timeline = [{"event": "rust job started", "detail": f"input end offsets total={total}, kill at >= {target}"}]
         i = 0
         reader = self.kafka.offset_reader(group)
@@ -403,17 +436,21 @@ class Run:
             except Exception:
                 c = {}
             if sum(c.values()) >= target:
-                self.docker.kill(name)
+                try:
+                    self.docker.kill(name)
+                except HarnessError:
+                    if self.running(name):
+                        raise
+                    reader.close()
+                    raise self.exited_early(target, total) from None
                 t_kill = dt.datetime.now(dt.timezone.utc)
                 at_kill = self.kafka.committed(group, self.job.input_topic, reader)
                 reader.close()
                 break
             i += 1
-            if i % 10 == 0:
-                state = self.docker.docker("inspect", "-f", "{{.State.Running}}", name, capture=True).stdout.strip()
-                if state != "true":
-                    reader.close()
-                    raise HarnessError(f"rust job exited before committed offsets reached {target}/{total}")
+            if i % 10 == 0 and not self.running(name):
+                reader.close()
+                raise self.exited_early(target, total)
             time.sleep(0.02)
         timeline.append({"event": "SIGKILL", "detail": f"{t_kill.isoformat()} committed={sum(at_kill.values())}/"
                                                       f"{total} per partition={dict(sorted(at_kill.items()))}"})
@@ -421,9 +458,36 @@ class Run:
         t_restart = dt.datetime.now(dt.timezone.utc)
         timeline.append({"event": "restart (same container, group.id and transactional.id)",
                          "detail": t_restart.isoformat()})
-        return {"chaos_at": self.a.chaos_at, "input_total": total, "kill_target": target,
+        return {"mode": "kill", "chaos_at": self.a.chaos_at, "input_total": total, "kill_target": target,
                 "kill_committed_total": sum(at_kill.values()), "kill_committed": at_kill,
                 "kill_time": t_kill.isoformat(), "restart_time": t_restart.isoformat(), "timeline": timeline}
+
+    def failpoint(self, name, group, image, env):
+        total, target = self.chaos_target()
+        timeline = [{"event": "rust job started", "detail": f"input end offsets total={total}, "
+                                                           f"TELEMETRY_FAILPOINT_AT_OFFSETS={target}"}]
+        code = self.docker.wait(name)
+        t_crash = dt.datetime.now(dt.timezone.utc)
+        reader = self.kafka.offset_reader(group, "read_uncommitted")
+        try:
+            at_crash = self.kafka.committed(group, self.job.input_topic, reader)
+        finally:
+            reader.close()
+        if code == 0:
+            raise HarnessError(f"rust job exited 0 with TELEMETRY_FAILPOINT_AT_OFFSETS={target}, so the failpoint "
+                               "never fired; the image must implement it (docs/RUST_JOB_CONTRACT.md).")
+        timeline.append({"event": f"failpoint crash (exit {code})",
+                         "detail": f"{t_crash.isoformat()} committed={sum(at_crash.values())}/{total} "
+                                   f"per partition={dict(sorted(at_crash.items()))}"})
+        self.docker.logs(name, self.dir / "rust-job.log")
+        self.docker.remove(name)
+        self.docker.start_rust(name, image, env, self.log)
+        t_restart = dt.datetime.now(dt.timezone.utc)
+        timeline.append({"event": "restart (new container, same group.id and transactional.id, "
+                                  "no TELEMETRY_FAILPOINT_AT_OFFSETS)", "detail": t_restart.isoformat()})
+        return {"mode": "failpoint", "chaos_at": self.a.chaos_at, "input_total": total, "kill_target": target,
+                "kill_committed_total": sum(at_crash.values()), "kill_committed": at_crash,
+                "kill_time": t_crash.isoformat(), "restart_time": t_restart.isoformat(), "timeline": timeline}
 
     # ---------- report ----------
 

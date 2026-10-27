@@ -19,6 +19,7 @@ A Rust port of a legacy job is a container image that the parity harness starts 
 | `TRANSACTIONAL_ID` | `rust.<job>.tx` |
 | `STATE_TOPIC_PREFIX` | `rust.<job>.state` |
 | `EXIT_WHEN_CAUGHT_UP` | `true` |
+| `TELEMETRY_FAILPOINT_AT_OFFSETS` | `--chaos-mode failpoint` only, first start only: `ceil(--chaos-at * input end offsets)` |
 
 ## Behavior
 
@@ -30,6 +31,7 @@ A Rust port of a legacy job is a container image that the parity harness starts 
 6. Output values must match the schema and the legacy job exactly. Fields are the declared schema fields, no more and no fewer.
 7. Any Kafka topic the job creates must start with `STATE_TOPIC_PREFIX`. The job writes nowhere else.
 8. Exit 0 once committed offsets reach the end offsets recorded at startup.
+9. Failpoint (test only): when `TELEMETRY_FAILPOINT_AT_OFFSETS=N` is set, in the first transaction whose committed input offsets would reach `N`, produce the outputs and state records, call `send_offsets_to_transaction`, flush the producer, then SIGKILL the process before `commit_transaction`. Unset means no failpoint. The harness runs the image with an init process (`init: true`), so the job is not PID 1 and its own SIGKILL terminates it. It treats the crash as the kill and restarts the job without the variable.
 
 The harness checks completion itself through the consumer group's committed offsets; it does not trust the exit code alone.
 
@@ -45,7 +47,7 @@ The harness checks completion itself through the consumer group's committed offs
 | E2 | Location fields have at most `x-precision` decimals and the same maximum as legacy. |
 | E3 | No topics or S3 prefixes other than the declared output and `STATE_TOPIC_PREFIX*`. Sensitive fields found in state topics are reported. |
 | E4 | With `--manifest`, declared inputs, outputs, state stores and sensitive fields equal what was observed. |
-| F | With `--chaos`: kill point, restart time, aborted-transaction records, duplicates after restart. |
+| F | With `--chaos`: mode, kill or crash point, restart time, aborted-transaction records (read_uncommitted minus read_committed) per topic for the output topic and every topic under `STATE_TOPIC_PREFIX`, duplicates after restart. |
 
 ## Privacy manifest (optional, check E4)
 

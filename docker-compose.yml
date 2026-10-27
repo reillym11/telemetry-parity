@@ -50,6 +50,8 @@ services:
   rust-job:
     image: ${RUST_IMAGE:-telemetry-rs/unset:unset}
     profiles: ["jobs"]
+    # the job is not PID 1, so a SIGKILL it sends itself (failpoint) terminates it
+    init: true
     environment:
       AWS_ACCESS_KEY_ID: minioadmin
       AWS_SECRET_ACCESS_KEY: minioadmin

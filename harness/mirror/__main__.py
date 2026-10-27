@@ -3,11 +3,13 @@
 It consumes the input topics as CONSUMER_GROUP and, in each transaction, re-emits the share of the legacy output
 that matches the fraction of input committed so far, together with the input offsets
 (send_offsets_to_transaction). A restart after SIGKILL resumes from the committed fraction, so output is
-exactly-once. MIRROR_FAULT injects one deliberate defect so the harness can prove each check fails.
+exactly-once. Each transaction also writes one progress record to a state topic under STATE_TOPIC_PREFIX.
+TELEMETRY_FAILPOINT_AT_OFFSETS works as in the contract. MIRROR_FAULT injects one deliberate defect so the harness can prove each check fails.
 """
 import json
 import os
 import re
+import signal
 import sys
 import tempfile
 import time
@@ -18,7 +20,7 @@ import boto3
 import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
-from confluent_kafka import Consumer, KafkaException, Producer, TopicPartition
+from confluent_kafka import Consumer, KafkaError, KafkaException, Producer, TopicPartition
 from confluent_kafka.admin import AdminClient, NewTopic
 
 TIME_FIELD = {"charging.sessions.v1": "start_time", "service.dtc.alerts.v1": "event_time",
@@ -126,6 +128,7 @@ def main():
     log(f"start: input end offsets={total} committed={c0} restart={restart} fault={fault}")
     if c0 >= total:
         return 0
+    failpoint = int(env["TELEMETRY_FAILPOINT_AT_OFFSETS"]) if env.get("TELEMETRY_FAILPOINT_AT_OFFSETS") else None
 
     out_topic, out_path = env.get("OUTPUT_TOPIC"), env.get("OUTPUT_PATH")
     if out_topic:
@@ -147,6 +150,15 @@ def main():
     producer = Producer(pconf)
     if out_topic and transactional:
         producer.init_transactions(30)
+    state = None
+    if out_topic and transactional:
+        state = env["STATE_TOPIC_PREFIX"] + ".progress"
+        admin = AdminClient({"bootstrap.servers": boot})
+        try:
+            admin.create_topics([NewTopic(state, 6, 1, config={"cleanup.policy": "compact"})])[state].result(30)
+        except KafkaException as e:
+            if e.args[0].code() != KafkaError.TOPIC_ALREADY_EXISTS:
+                raise
 
     side = None
     if fault == "new-sink" and out_topic:
@@ -177,10 +189,13 @@ def main():
         if msgs:
             n = upto(sum(pos.values()))
             offsets = [TopicPartition(t, p, o) for (t, p), o in sorted(pos.items())]
+            crash = failpoint is not None and sum(pos.values()) >= failpoint
             if out_topic:
-                emit_kafka(producer, consumer, transactional, out_topic, side, recs[n_prev:n], offsets)
+                emit_kafka(producer, consumer, transactional, out_topic, side, state, recs[n_prev:n], offsets, crash)
             else:
                 emit_parquet(table, n_prev, n, out_path)
+                if crash:
+                    die()
                 consumer.commit(offsets=offsets, asynchronous=False)
             n_prev = n
         if all(pos[k] >= e for k, e in ends.items()):
@@ -190,15 +205,25 @@ def main():
     return 0
 
 
-def emit_kafka(producer, consumer, transactional, topic, side, recs, offsets):
+def die():
+    log("failpoint: SIGKILL before commit")
+    os.kill(os.getpid(), signal.SIGKILL)
+
+
+def emit_kafka(producer, consumer, transactional, topic, side, state, recs, offsets, crash):
     if transactional:
         producer.begin_transaction()
     for k, v in recs:
         producer.produce(topic, key=k.encode(), value=v.encode())
         if side:
             producer.produce(side, key=k.encode(), value=v.encode())
+    if state:
+        producer.produce(state, key=b"progress", value=json.dumps({"committed": sum(o.offset for o in offsets)}).encode())
     if transactional:
         producer.send_offsets_to_transaction(offsets, consumer.consumer_group_metadata(), 30)
+        if crash:
+            producer.flush(30)
+            die()
         producer.commit_transaction(30)
     else:
         producer.flush(30)
