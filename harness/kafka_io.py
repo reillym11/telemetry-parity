@@ -70,7 +70,8 @@ class Kafka:
                 c.close()
 
     def offset_reader(self, group, isolation="read_committed") -> Consumer:
-        # read_committed waits for any open transaction's pending offsets (require_stable)
+        # read_committed waits for an open transaction's pending offsets (require_stable), so after a kill
+        # mid-transaction it times out; read_uncommitted returns the last committed offsets at once
         return Consumer({"bootstrap.servers": self.bootstrap, "group.id": group, "enable.auto.commit": False,
                          "isolation.level": isolation, "log_level": 3})
 

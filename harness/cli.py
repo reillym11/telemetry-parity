@@ -429,7 +429,7 @@ class Run:
         total, target = self.chaos_target()
         timeline = [{"event": "rust job started", "detail": f"input end offsets total={total}, kill at >= {target}"}]
         i = 0
-        reader = self.kafka.offset_reader(group)
+        reader = self.kafka.offset_reader(group, "read_uncommitted")
         while True:
             try:
                 c = self.kafka.committed(group, self.job.input_topic, reader)
